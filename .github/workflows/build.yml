@@ -124,8 +124,7 @@ jobs:
             .
 
       - name: Build
-        run: |
-          cmake --build build
+        run: cmake --build build --parallel --target install
 
   ubuntu-build:
     name: Ubuntu ${{ matrix.compiler }} SCALAR_DOUBLE=${{ matrix.scalar_double }}
@@ -213,7 +212,7 @@ jobs:
           -DBUILD_TESTING=ON
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel --target install
 
       - name: Test
         run: xvfb-run ctest --test-dir build
