@@ -11,17 +11,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scalar_double: [ "OFF" ]
+        scalar_double: [ "OFF", "ON" ]
         config:
-#          - {
-#            name: "Windows MSVC",
-#            os: windows-latest,
-#            generator: "Ninja",
-#            conda_library_dir: "Library",
-#            compile_qanimation_with_ffmpeg: "ON",
-#            compile_qpcl: "ON",
-#            compile_qransac: "ON",
-#          }
+          - {
+            name: "Windows MSVC",
+            os: windows-latest,
+            generator: "Ninja",
+            conda_library_dir: "Library",
+            compile_qanimation_with_ffmpeg: "ON",
+            compile_qpcl: "ON",
+            compile_qransac: "ON",
+          }
           - {
             name: "macOS Clang",
             os: macos-latest,
@@ -127,8 +127,13 @@ jobs:
         run: |
           cmake --build build
 
-      - name: Install
+      - name: Install (macOs)
+        if: matrix.config.os == 'macos-latest'
         run: sudo cmake --install build
+
+      - name: Install (Windows)
+        if: matrix.config.os == 'windows-latest'
+        run: cmake --install build
 
   ubuntu-build:
     name: Ubuntu ${{ matrix.compiler }} SCALAR_DOUBLE=${{ matrix.scalar_double }}
@@ -221,3 +226,6 @@ jobs:
 
       - name: Test
         run: xvfb-run ctest --test-dir build
+
+      - name: Install
+        run: cmake --install build
