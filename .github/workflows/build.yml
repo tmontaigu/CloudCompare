@@ -6,7 +6,7 @@ jobs:
   build:
     name: ${{ matrix.config.name }} SCALAR_DOUBLE=${{ matrix.scalar_double }}
     runs-on: ${{ matrix.config.os }}
-#    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
 
     strategy:
       fail-fast: false
@@ -31,7 +31,6 @@ jobs:
             compile_qpcl: "OFF",
             compile_qransac: "ON",
           }
-
 
     steps:
       - name: Checkout
@@ -110,7 +109,7 @@ jobs:
             -DPLUGIN_STANDARD_QANIMATION=ON \
             -DQANIMATION_WITH_FFMPEG_SUPPORT=${{ matrix.config.compile_qanimation_with_ffmpeg }} \
             -DPLUGIN_STANDARD_QBROOM=ON \
-            -DPLUGIN_STANDARD_QCANUPO=ON \
+            -DPLUGIN_STANDARD_QCANUPO=OFF \
             -DPLUGIN_STANDARD_QCOMPASS=ON \
             -DPLUGIN_STANDARD_QCSF=ON \
             -DPLUGIN_STANDARD_QFACETS=ON \
@@ -125,7 +124,8 @@ jobs:
             .
 
       - name: Build
-        run: cmake --build build --parallel
+        run: |
+          cmake --build build
 
       - name: Install
         run: sudo cmake --install build
@@ -140,7 +140,7 @@ jobs:
       fail-fast: false
       matrix:
         scalar_double: [ "OFF", "ON" ]
-        compiler: ["GCC", "Clang"]
+        compiler: [ "GCC", "Clang" ]
 
     steps:
       - name: Checkout
@@ -217,7 +217,7 @@ jobs:
           -DBUILD_TESTING=ON
 
       - name: Build
-        run: cmake --build build --parallel --target install
+        run: cmake --build build --parallel
 
       - name: Test
         run: xvfb-run ctest --test-dir build
