@@ -64,6 +64,8 @@ if( PLUGIN_IO_QRDB )
 		if(MSVC)
 			# on Windows put the dll to the binaries for them to find them
 			set(_rdb_libdir "${CLOUDCOMPARE_DEST_FOLDER}")
+		elseif(APPLE)
+			set(_rdb_libdir CLOUDCOMPARE_MAC_FRAMEWORK_DIR)
 		else()
 			# some distros prefer "lib" others like more specific folders like "lib64" (handled by GNUInstallDirs)
 			if( CMAKE_INSTALL_LIBDIR STREQUAL "" )
