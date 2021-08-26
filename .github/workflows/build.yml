@@ -128,7 +128,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Install
-        run: cmake --install build
+        run: sudo cmake --install build
 
   ubuntu-build:
     name: Ubuntu ${{ matrix.compiler }} SCALAR_DOUBLE=${{ matrix.scalar_double }}
