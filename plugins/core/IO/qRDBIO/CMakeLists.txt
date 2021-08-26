@@ -70,13 +70,15 @@ if( PLUGIN_IO_QRDB )
 				# see: https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html
 				include(GNUInstallDirs)
 			endif()
-			if( CMAKE_INSTALL_LIBDIR STREQUAL "" )
+
+			if( NOT CMAKE_INSTALL_LIBDIR OR CMAKE_INSTALL_LIBDIR STREQUAL "" )
 				# still no library destination? just use "lib" to be extra save
 				set(_rdb_libdir "lib")
 			else()
 				set(_rdb_libdir "${CMAKE_INSTALL_LIBDIR}")
 			endif()
 		endif()
+		message(STATUS "WILL INSTALL RDB TO ${_rdb_libdir}")
 		get_target_property(RDB_LIBRARY_FILE rdbc IMPORTED_LOCATION)
 		# resolve possible symlink and install the real library
 		get_filename_component(lib_REAL ${RDB_LIBRARY_FILE} REALPATH)
