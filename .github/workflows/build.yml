@@ -134,6 +134,19 @@ jobs:
         if: matrix.config.os == 'windows-latest'
         run: cmake --install build
 
+
+      - name: macOs dmg
+        run: |
+          brew install create-dmg
+          create-dmg "CloudCompare.dmg" "/usr/local/CloudCompare/"
+
+
+      - name: Upload wheels as artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: "CloudCompare-dmg"
+          path: "CloudCompare.dmg"
+
   ubuntu-build:
     name: Ubuntu ${{ matrix.compiler }} SCALAR_DOUBLE=${{ matrix.scalar_double }}
     runs-on: ubuntu-20.04
