@@ -1,0 +1,189 @@
+{
+  "configurePresets": [
+    {
+      "name": "macos-release-features",
+      "description": "All features/plugins for a releasu build of CC on macOS",
+      "cacheVariables": {
+
+        "CMAKE_CXX_FLAGS": {
+          "value": "-DDLIB_NO_GUI_SUPPORT -DCC_MAC_DEV_PATHS"
+        },
+        "CCCORELIB_USE_CGAL": {
+          "value": "ON"
+        },
+
+        "OPTION_USE_DXF_LIB": {
+          "value": "ON"
+        },
+        "OPTION_USE_SHAPE_LIB" : {
+          "value": "ON"
+        },
+        "OPTION_USE_GDAL": {
+          "value": "ON"
+        },
+
+
+        "PLUGIN_GL_QEDL": {
+          "value": "ON"
+        },
+        "PLUGIN_GL_QSSAO": {
+          "value": "ON"
+        },
+
+
+        "PLUGIN_STANDARD_QANIMATION": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QBROOM": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QCANUPO": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QCOLORIMETRIC_SEGMENTER": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QCOMPASS": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QCSF": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QFACETS": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QHOUGH_NORMALS": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QHPR": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QM3C2": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QMPLANE": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QPCL": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QPCV": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QPOISSON_RECON": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QRANSAC_SD": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_QSRA": {
+          "value": "ON"
+        },
+        "PLUGIN_STANDARD_MASONRY_QAUTO_SEG": {
+          "value": "OFF"
+        },
+        "PLUGIN_STANDARD_MASONRY_QMANUAL_SEG": {
+          "value": "OFF"
+        },
+
+
+
+        "PLUGIN_IO_QCORE": {
+          "value": "ON"
+        },
+        "PLUGIN_IO_QADDITIONAL": {
+          "value": "ON"
+        },
+        "PLUGIN_IO_QCSV_MATRIX": {
+          "value": "ON"
+        },
+        "PLUGIN_IO_QE57": {
+          "value": "ON"
+        },
+        "PLUGIN_IO_QPDAL": {
+          "value": "ON"
+        },
+        "PLUGIN_IO_QPHOTOSCAN": {
+          "value": "ON"
+        }
+
+
+      }
+    },
+    {
+      "name": "macos-x86_64-release",
+      "displayName": "MacOS x86_64 Release",
+      "description": "Configuration for an x86_64 release build on macOS, with external libs from homebrew",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-release-x86_64",
+      "inherits": "macos-release-features",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": {
+          "value": "Release"
+        },
+        "CMAKE_INSTALL_PREFIX" : {
+          "value": "${sourceDir}/cmake-build-release-x86_64/install"
+        },
+        "CMAKE_IGNORE_PATH": {
+          "value": "/opt/homebrew/lib/cmake;/opt/homebrew/lib/;/opt/homebrew/include/;/opt/homebrew/include/pcl-1.12;/opt/homebrew/Cellar/gdal/3.3.3/lib;/opt/homebrew/Cellar/pcl"
+        },
+        "CMAKE_PREFIX_PATH":{
+          "value": "/usr/local/opt/qt@5;/usr/local/lib/cmake;/usr/local/lib/cmake/XercesC;/usr/local/Cellar/pcl/1.12.0_1/share"
+        },
+        "PDAL_DIR":{
+          "value": "/usr/local/lib/cmake/PDAL"
+        },
+        "PCL_DIR": {
+          "value": "/usr/local/Cellar/pcl/1.12.0_1/share"
+        },
+        "EIGEN_ROOT_DIR": {
+          "value": "/usr/local/include/eigen3"
+        },
+        "CMAKE_OSX_ARCHITECTURES": {
+          "value": "x86_64"
+        }
+      }
+    },
+    {
+      "name": "macos-arm64-release",
+      "displayName": "MacOS arm64 Release",
+      "description": "Configuration for an arm64 release build on macOS with external libs from homebrew",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-release-arm64",
+      "inherits": "macos-release-features",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": {
+          "value": "Release"
+        },
+        "CMAKE_IGNORE_PATH": {
+          "value": "/usr/local;/usr/local/lib;/usr/local/opt/qt@5;/usr/local/opt/qt@5/bin;/usr/local/opt/qt@5/lib"
+        },
+        "CMAKE_INSTALL_PREFIX": {
+          "value": "${sourceDir}/cmake-build-release-arm64/install"
+        },
+        "CMAKE_PREFIX_PATH": {
+          "value": "/opt/homebrew/Cellar/qt@5/5.15.2_1"
+        },
+
+        "EIGEN_ROOT_DIR": {
+          "value": "/opt/homebrew/include/eigen3"
+        },
+        "CMAKE_OSX_ARCHITECTURES": {
+          "value": "arm64"
+        }
+
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos-x86_64-release",
+      "configurePreset": "macos-x86_64-release"
+    },
+    {
+      "name": "macos-arm64-release",
+      "configurePreset": "macos-arm64-release"
+    }
+  ],
+  "version": 2
+}
