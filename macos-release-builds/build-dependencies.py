@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any, NoReturn
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +15,8 @@ import platform
 import shutil
 from subprocess import CalledProcessError
 import re
+import argparse
+import hashlib
 
 # TODO: avoid redoing some steps like extraction, configuration, building if it was already done and
 #       shit did not change
@@ -22,61 +24,131 @@ import re
 # https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html
 # https://stackoverflow.com/questions/24659753/cmake-find-library-and-cmake-find-root-path
 # https://cmake.org/cmake/help/latest/variable/CMAKE_FIND_ROOT_PATH_MODE_LIBRARY.html
+# https://clang.llvm.org/docs/CrossCompilation.html
+
+# https://clang.llvm.org/docs/CommandGuide/clang.html
 
 
-TARGET_OS_VERSION = 11.0
-TARGET_ARCH = "arm64"
+class Config:
+    def __init__(
+        self,
+        target_arch: Optional[str] = None,
+        target_os_version: Optional[str] = None,
+        num_jobs: Optional[int] = None,
+    ) -> None:
+        if target_arch is None:
+            target_arch = platform.machine()
 
-SCRIPT_DIR = os.path.dirname(__file__)
-# The dir where we put downloaded archives/gits, build files, etc
-WORKING_DIR = Path(SCRIPT_DIR) / f"{TARGET_ARCH}-dependencies"
-INSTALL_ROOT = (Path(WORKING_DIR) / "install").absolute()
-INSTALL_BIN = INSTALL_ROOT /'bin'
-INSTALL_LIB = INSTALL_ROOT / 'lib'
-INSTALL_INCLUDE = INSTALL_ROOT / 'include'
-PKG_CONFIG_PATH = INSTALL_LIB / 'pkgconfig'
+        if target_os_version is not None and platform.system() != 'Darwin':
+            raise ValueError("target_os_version is only for macos")
+        elif target_os_version is None and platform.system() == 'Darwin':
+            if target_arch == 'x86_64':
+                target_os_version = "10.15"
+            elif target_arch == "arm64":
+                target_os_version = "11.0"
+            else:
+                raise ValueError(f"Unknown arch {target_arch}")
 
-NUM_JOBS = multiprocessing.cpu_count() - 1
+        if num_jobs is None:
+            num_jobs = multiprocessing.cpu_count()
 
-OUR_ENV_VARS = {
-    **os.environ,
-    "PKG_CONFIG_PATH": str(PKG_CONFIG_PATH),
-}
+        self.target_arch = target_arch
+        self.target_os_version = target_os_version
+        self.num_jobs = num_jobs
 
-OUR_ENV_VARS['PATH'] = f"{str(INSTALL_BIN)}:{OUR_ENV_VARS['PATH']}"
+        # Some important path which will be needed throughout:
+        self.script_dir: Path = Path(__file__).parent
+        # Where sources will be downloaded and re-used between target-arch build
+        self.sources_dir: Path = self.script_dir / "sources"
+        self.working_dir: Path = self.script_dir / self.target_arch
+        self.build_dir: Path = self.working_dir / "builds"
 
-#-mmacosx-version-min
+        self.install_root: Path = self.working_dir / "install"
+        self.install_lib: Path = self.install_root / 'lib'
+        self.install_bin: Path = self.install_root / 'bin'
+        self.install_include: Path = self.install_root / 'include'
+        self.pkg_config_path: Path = self.install_lib / 'pkgconfig'
 
-CMAKE_DEFAULT_CONFIG_OPTS = {
-    "-DCMAKE_BUILD_TYPE": "Release",
-    "-DCMAKE_INSTALL_PREFIX": str(INSTALL_ROOT),
-    # Otherwise on some Linux some lib would be in /lib and others in /lib64
-    "-DCMAKE_INSTALL_LIBDIR": str(INSTALL_LIB),
-    "-DCMAKE_PREFIX_PATH": str(INSTALL_LIB / "cmake"),
-    "-DCMAKE_INCLUDE_PATH": str(INSTALL_INCLUDE),
-    "-DCMAKE_LIBRARY_PATH": str(INSTALL_LIB),
-    #"-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
-    #"-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY", 
-    #"-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY", 
-    #"-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
-    "-DCMAKE_FIND_ROOT_PATH": str(INSTALL_ROOT),
-}
+        self.sources_dir.mkdir(exist_ok=True, parents=True)
+        self.working_dir.mkdir(exist_ok=True, parents=True)
+        self.build_dir.mkdir(exist_ok=True, parents=True)
+
+        # The environment variables that should be set when running a command
+        self.env_vars: Dict[str, str] = {
+            **os.environ,
+            "PKG_CONFIG_PATH": str(self.pkg_config_path),
+        }
+        self.env_vars['PATH'] = f"{str(self.install_bin)}:{self.env_vars['PATH']}"
+
+        # Dict with default config that should be used by the CMake build system
+        self.cmake_default_config_opts = {
+            "-DCMAKE_BUILD_TYPE": "Release",
+            "-DCMAKE_INSTALL_PREFIX": str(self.install_root),
+            # Otherwise, on some Linux some lib would be in /lib and others in /lib64
+            "-DCMAKE_INSTALL_LIBDIR": str(self.install_lib),
+            "-DCMAKE_PREFIX_PATH": str(self.install_lib / "cmake") + ";" + str(self.install_root),
+            "-DCMAKE_INCLUDE_PATH": str(self.install_include),
+            "-DCMAKE_LIBRARY_PATH": str(self.install_lib),
+            # "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM": "NEVER",
+            # "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY": "ONLY",
+            # "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
+            # "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
+            "-DCMAKE_FIND_ROOT_PATH": str(self.install_root),
+        }
+
+        if platform.system() == "Darwin":
+            self.cmake_default_config_opts['-DCMAKE_OSX_ARCHITECTURES'] = self.target_arch
+
+        # List of default options for Autotools build system
+        self.default_autotools_config_opts: List[str] = [
+            f"--prefix={str(self.install_root)}"
+        ]
+
+        # aka CPPFLAGS, used by make / autotools
+        self.compiler_preprocessor_flags: str = f"-I{self.install_include}"
+
+        # aka CFLAGS (for C) or CXXFLAGS (for C++)
+        # used by make / autotools
+        self.compiler_flags: str = "-O3"
+
+        # aka LDFLAGS
+        self.linker_flags: str = f"-L{self.install_lib}"
+
+        if platform.system() == "Darwin":
+            assert self.target_os_version is not None, "Target OS Version not set"
+            macos_version_flag = f" -mmacosx-version-min={self.target_os_version}"
+            self.compiler_flags += macos_version_flag
+            self.linker_flags += macos_version_flag
+
+            if self.target_arch != platform.machine():
+                # The 'target-triple' to cross compile with clang
+                target_triple = f"{self.target_arch}-apple-darwin"
+                self.compiler_flags += f' --target={target_triple}'
+                self.default_autotools_config_opts.append(f'--host={target_triple}')
+
+                self.compiler_flags += f' -arch {self.target_arch}'
+                self.linker_flags += f' -arch {self.target_arch}'
 
 
-AUTOTOOLS_DEFAULT_CONFIG_OPTS = [
-    f"--prefix={str(INSTALL_ROOT)}"
-]
+    @classmethod
+    def from_cmdline(cls):
+        parser = argparse.ArgumentParser(description="Downloads and builds the dependencies for CloudCompare on macOS")
 
-# aka CPPFLAGS
-COMPILER_PREPROCESSOR_FLAGS = {
-    '-I': [str(INSTALL_INCLUDE)],
-    
-}
+        parser.add_argument("--arch", help="The arch for which cloud compare should be build", default=None)
+        parser.add_argument("--macos-version", help="The minimum macOS version targeted", default=None)
+        parser.add_argument("--num-jobs", help="Number of jobs / threads for the build", default=None)
 
-# aka CFLAGS (for C) or CXXFLAGS (for C++)
-COMPILER_FLAGS = {
-    '-L': [str(INSTALL_LIB)],
-}
+        args = parser.parse_args()
+
+        return cls(
+            target_arch=args.arch,
+            target_os_version=args.macos_version,
+            num_jobs=args.num_jobs
+        )
+
+
+CONFIG: Config = Config.from_cmdline()
+CONFIG.working_dir.mkdir(exist_ok=True)
 
 # Commands
 CMAKE = "cmake"
@@ -88,6 +160,7 @@ CAPTURE=False
 
 LOGGER = logging.getLogger(__name__)
 
+
 def run_command(*args, **kwargs):
     if CAPTURE:
         stdout, stderr = subprocess.PIPE, subprocess.STDOUT
@@ -95,9 +168,10 @@ def run_command(*args, **kwargs):
         stdout, stderr = sys.stdout, sys.stderr
 
     LOGGER.debug(f"Running Command {args[0]}")
-    subprocess.run(*args, **kwargs, check=True, stdout=stdout, stderr=stderr, env=OUR_ENV_VARS)
+    subprocess.run(*args, **kwargs, check=True, stdout=stdout, stderr=stderr, env=CONFIG.env_vars)
 
-def maybe_log_subprocess_error(exc: subprocess.CalledProcessError):
+
+def maybe_log_subprocess_error(exc: subprocess.CalledProcessError) -> NoReturn:
     if CAPTURE:
         logging.critical(exc.stdout.decode())
     exit(1)
@@ -120,6 +194,7 @@ def set_directory(path: Union[Path, str]):
         yield
     finally:
         os.chdir(origin)
+
 
 class BuildSystem(ABC):
     @abstractmethod
@@ -149,12 +224,20 @@ def parse_top_level_dir_of_tar(archive_path: str) -> str:
     pc = subprocess.run(["tar", "-tf", archive_path], check=True, stdout=subprocess.PIPE)
     lines = pc.stdout.decode().splitlines()
     regex = re.compile("^[^/]+/?$")
-
     matches = []
     for line in lines:
-        # use python3.10 := in a list comp ?
-        if match := regex.match(line):
+        if regex.match(line) is not None:
             matches.append(line)
+
+    # The above may not be correct for some tarballs
+    # try something else
+    if len(matches) != 1:
+        top_levels = set()
+        for line in lines:
+            top_levels.add(Path(line).parts[0])
+
+        assert len(top_levels) == 1
+        matches = list(top_levels)
 
     assert len(matches) == 1
     return matches[0]
@@ -172,6 +255,10 @@ def extract_archive(archive_path: str, dest_folder):
         extract_dir_name = parse_top_level_dir_of_tar(archive_path)
         return str(Path(dest_folder) / extract_dir_name)
 
+    if archive_path.endswith(".tar.bz2"):
+        subprocess.run(['tar', '-xjf', archive_path, '-C', dest_folder])
+        extract_dir_name = parse_top_level_dir_of_tar(archive_path)
+        return str(Path(dest_folder) / extract_dir_name)
 
     raise NotImplementedError
 
@@ -184,51 +271,43 @@ class Dependency:
     build_system: BuildSystem
 
     def handle(self) -> None:
-        our_dir = WORKING_DIR / self.name
-        our_dir.mkdir(exist_ok=True)
+        our_source_dir = CONFIG.sources_dir / self.name
+        our_source_dir.mkdir(exist_ok=True)
 
         try:
-            extrated_dir = self.source.download_to(str(our_dir))
-            LOGGER.debug(f"Sources are ready at: {extrated_dir}")
+            extracted_dir = self.source.download_to(str(our_source_dir))
+            LOGGER.debug(f"Sources are ready at: {extracted_dir}")
         except CalledProcessError as e:
             # maybe LOGGER.exception ?
             LOGGER.critical("Failed to download sources")
             maybe_log_subprocess_error(e)
 
-       
+        our_build_dir = CONFIG.build_dir / self.name
+        our_build_dir.mkdir(exist_ok=True)
 
-        build_dir = our_dir / 'build'
-        build_dir.mkdir(exist_ok=True)
+        # if not is_dir_empty(our_build_dir):
+        #     LOGGER.debug("Build dir not empty, doing nothing")
+        #     return
 
         LOGGER.debug("Configuring")
         try:
             self.build_system.configure(
-                source_dir=str(extrated_dir),
-                build_dir=str(build_dir)
+                source_dir=str(extracted_dir),
+                build_dir=str(our_build_dir)
             )
         except CalledProcessError as e:
             LOGGER.critical("Failed to configure")
             maybe_log_subprocess_error(e)
 
-        
         LOGGER.debug("Building")
         self.build_system.build(
-                build_dir=str(build_dir)
+                build_dir=str(our_build_dir)
         )
-        # try:
-        #     self.build_system.build(
-        #         build_dir=str(build_dir)
-        #     )
-        # except CalledProcessError as e:
-        #     LOGGER.critical("Failed to build")
-        #     maybe_log_subprocess_error(e)
-            
-
 
         LOGGER.debug("Installing")
         try:
             self.build_system.install(
-                build_dir=str(build_dir)
+                build_dir=str(our_build_dir)
             )
         except CalledProcessError as e:
             LOGGER.critical("Failed to configure")
@@ -265,21 +344,26 @@ class InternetArchive(SourceDistribution):
             run_command([CURL, '--location', self.url, '-o', local_archive_path])
             LOGGER.debug('Sources successfully downloaded')
 
-        parse_top_level_dir_of_tar(str(local_archive_path))
-        extracted_dir_name = parse_top_level_dir_of_tar(str(local_archive_path))
-        if Path(extracted_dir_name).exists():
+        expected_extracted_dir = Path(output_dir) / parse_top_level_dir_of_tar(str(local_archive_path))
+        if expected_extracted_dir.exists():
             LOGGER.debug("Archive already extracted")
-            return extracted_dir_name
+            return str(expected_extracted_dir)
         else:
             LOGGER.debug("Extracting sources")
             extracted_dir = extract_archive(str(local_archive_path), output_dir)
             LOGGER.debug(f"Sources extracted to {extracted_dir}")
-            assert extracted_dir == extracted_dir_name
+            assert extracted_dir == str(expected_extracted_dir), f"{extracted_dir} is not the same as {expected_extracted_dir}"
             return str(extracted_dir)
 
     def verify_checksum(self):
-        if self.expected_hash is not None:
-            raise NotImplementedError
+        return NotImplementedError
+        # if self.expected_hash is not None:
+        #     algo, expected_hash = self.expected_hash.split(':')
+        #     if algo == 'sha256':
+        #         hashlib.sha256()
+        #     else:
+        #         raise NotImplementedError
+
 
 class GitRepo(SourceDistribution):
     def __init__(self, url: str, ref: str, after_commands: Optional[List[str]] = None):
@@ -293,7 +377,7 @@ class GitRepo(SourceDistribution):
         output_dir = Path(output_dir) / base_name
         if output_dir.exists():
             LOGGER.debug('Project already cloned')
-            return output_dir
+            return str(output_dir)
 
         LOGGER.debug('Cloning project')
         run_command([GIT, 'clone', self.url, str(output_dir)])
@@ -317,9 +401,9 @@ class GitRepo(SourceDistribution):
 class CMake(BuildSystem):
     def __init__(self, configure_options: Dict[str, str] = None) -> None:
         if configure_options is None:
-            self.configure_options = {**CMAKE_DEFAULT_CONFIG_OPTS}
+            self.configure_options = {**CONFIG.cmake_default_config_opts}
         else:
-            self.configure_options = {**CMAKE_DEFAULT_CONFIG_OPTS, **configure_options}
+            self.configure_options = {**CONFIG.cmake_default_config_opts, **configure_options}
 
     def configure(self, source_dir: str, build_dir: str):
         options_as_cmd_args = []
@@ -328,43 +412,31 @@ class CMake(BuildSystem):
         run_command([CMAKE, '-S', source_dir, '-B', build_dir] + options_as_cmd_args)
 
     def build(self, build_dir: str):
-        run_command([CMAKE, '--build', build_dir, f'-j{NUM_JOBS}'])
+        run_command([CMAKE, '--build', build_dir, f'-j{CONFIG.num_jobs}'])
 
     def install(self, build_dir: str):
         run_command([CMAKE, '--install', build_dir])
  
 
-
-
 class Autotools(BuildSystem):
     def __init__(self, configure_options: List[str] = None, supports_out_of_tree_build=True) -> None:
         if configure_options is not None:
-            self.configure_options = [*AUTOTOOLS_DEFAULT_CONFIG_OPTS, *configure_options]
+            self.configure_options = [*CONFIG.default_autotools_config_opts, *configure_options]
         else:
-            self.configure_options = [*AUTOTOOLS_DEFAULT_CONFIG_OPTS]
+            self.configure_options = [*CONFIG.default_autotools_config_opts]
         self.supports_out_of_tree_build = supports_out_of_tree_build
 
     def configure(self, source_dir: str, build_dir: str):
-        cpp_flags_value = ""
-        for key, value in COMPILER_PREPROCESSOR_FLAGS.items():
-            if isinstance(value, list):
-                for v in value:
-                    cpp_flags_value += f"{key}{v} "
-            else:
-                cpp_flags_value += f"{key}{value} "
-
-        cxx_flags_value = ""
-        for key, value in COMPILER_FLAGS.items():
-            if isinstance(value, list):
-                for v in value:
-                    cxx_flags_value += f"{key}{v} "
-            else:
-                cxx_flags_value += f"{key}{value} "
-
         if self.supports_out_of_tree_build:
             with set_directory(build_dir):
                 run_command(
-                    [f"{source_dir}/configure", f"CPPFLAGS={cpp_flags_value}", f"CXXFLAGS={cxx_flags_value}", f"CFLAGS={cxx_flags_value}"] + self.configure_options,
+                    [
+                        f"{source_dir}/configure",
+                        f"CPPFLAGS={CONFIG.compiler_preprocessor_flags}",
+                        f"CXXFLAGS={CONFIG.compiler_flags}",
+                        f"CFLAGS={CONFIG.compiler_flags}",
+                        f"LDFLAGS={CONFIG.linker_flags}",
+                    ] + self.configure_options,
                 )
         else:
             if is_dir_empty(build_dir): 
@@ -372,17 +444,22 @@ class Autotools(BuildSystem):
                 shutil.copytree(src=source_dir, dst=build_dir, dirs_exist_ok=True)
             with set_directory(build_dir):
                 run_command(
-                    [f"./configure", f"CPPFLAGS={cpp_flags_value}", f"CXXFLAGS={cxx_flags_value}", f"CFLAGS={cxx_flags_value}"] + self.configure_options,
+                    [
+                        f"./configure",
+                        f"CPPFLAGS={CONFIG.compiler_preprocessor_flags}",
+                        f"CXXFLAGS={CONFIG.compiler_flags}",
+                        f"CFLAGS={CONFIG.compiler_flags}",
+                        f"LDFLAGS={CONFIG.linker_flags}",
+                    ] + self.configure_options,
                 )
 
     def build(self, build_dir: str):
         with set_directory(build_dir):
-            run_command([MAKE, f'-j{NUM_JOBS}'])
+            run_command([MAKE, f'-j{CONFIG.num_jobs}'])
 
     def install(self, build_dir: str):
         with set_directory(build_dir):
             run_command([MAKE, 'install'])
-
 
 
 class Qt5Build(Autotools):
@@ -392,53 +469,84 @@ class Qt5Build(Autotools):
     
     def configure(self, source_dir: str, build_dir: str):
         # https://github.com/qbittorrent/qBittorrent/wiki/Compilation:-macOS-(x86_64,-arm64,-cross-compilation)
-        saved_cwd = os.getcwd()
-        os.chdir(build_dir)
-        # Without this we get
-        # Project ERROR: You cannot configure qt separately within a top-level build.
-        # run_command(['touch', '.qmake.stash'])
-        # run_command(['touch', '.qmake.super'])
+        with set_directory(build_dir):
+            command = [
+                f"{source_dir}/configure",
+                "-release",
+                "-nomake", "examples",
+                "-nomake", "tests",
+                "-opensource",
+                "-confirm-license",
+                "-skip", "qtwebengine",
+                "-skip", "qt3d",
+                "-qt-pcre",
+                "-qt-libjpeg",
+                "-qt-freetype",
+                "-platform", "macx-clang",
+                "-prefix", str(CONFIG.install_root),
+            ]
 
-        command = [
-            f"{source_dir}/configure",
-            "-release",
-            "-nomake", "examples",
-            "-nomake", "tests",
-            "-opensource",
-            "-confirm-license",
-            "-skip", "qtwebengine",
-            "-skip", "qt3d",
-            "-qt-pcre",
-            "-qt-libjpeg",
-            "-qt-freetype",
-            "-platform", "macx-clang",
-            "-prefix", str(INSTALL_ROOT),
-        ]
+            if platform.system() == "Darwin":
+                command.append(f"QMAKE_APPLE_DEVICE_ARCHS={CONFIG.target_arch}")
+                command.append(f"QMAKE_MACOSX_DEPLOYMENT_TARGET={CONFIG.target_os_version}")
 
-        if platform.system() == "Darwin":
-            command.append(f"QMAKE_APPLE_DEVICE_ARCHS={TARGET_ARCH}")
-            command.append(f"QMAKE_MACOSX_DEPLOYMENT_TARGET={TARGET_OS_VERSION}")
-
-        run_command(command)
-        os.chdir(saved_cwd)
+            run_command(command)
 
 
 class BoostBuildSystem(BuildSystem):
+    # Useful for cross compilation
     def configure(self, source_dir: str, build_dir: str):
         if is_dir_empty(build_dir):
             LOGGER.debug("Out of tree build not supported, copying sources to build dir")
             shutil.copytree(src=source_dir, dst=build_dir, dirs_exist_ok=True)
 
         with set_directory(build_dir):
-            run_command([f'./bootstrap.sh', f"--prefix={INSTALL_ROOT}"])
+            cxx_flags_value = f"-arch {CONFIG.target_arch}"
+            c_flags = cxx_flags_value
+            linkflags = f"-arch {CONFIG.target_arch}"
+            run_command([
+                f'./bootstrap.sh',
+                f'cxxflags={cxx_flags_value}',
+                f'cflags={c_flags}',
+                f'linkflags={linkflags}',
+                f"--prefix={CONFIG.install_root}"
+            ])
+
+    def create_b2_command(self) -> List[str]:
+        cxx_flags_value = f"-arch {CONFIG.target_arch}"
+        c_flags = cxx_flags_value
+        linkflags = f"-arch {CONFIG.target_arch}"
+
+        # arm64 -> arm, x86_64 -> x86
+        architecture = CONFIG.target_arch[:3]
+
+        command = [
+            './b2',
+            f'cxxflags={cxx_flags_value}',
+            f'cflags={c_flags}',
+            f'linkflags={linkflags}',
+            'target-os=darwin',
+            f'architecture={architecture}',
+        ]
+
+        if CONFIG.target_arch == 'x86_64' and CONFIG.target_arch != platform.machine():
+            # We are cross compiling to x86_64
+            command.append('abi=sysv')
+            command.append('binary-format=mach-o')
+            command.append('-a')
+
+        return command
 
     def build(self, build_dir: str):
+        command = self.create_b2_command()
         with set_directory(build_dir):
-            run_command(['./b2'])
+            run_command(command)
 
     def install(self, build_dir: str):
+        command = self.create_b2_command()
+        command.append("install")
         with set_directory(build_dir):
-            run_command(['./b2', 'install'])
+            run_command(command)
 
 
 DEPENDENCIES: List[Dependency] = [
@@ -447,6 +555,7 @@ DEPENDENCIES: List[Dependency] = [
     #     source=GitRepo(
     #         url="git://code.qt.io/qt/qt5.git",
     #         ref="v5.15.2",
+    #         # TODO: move this to configure step of build system ?
     #         after_commands=[
     #             "./init-repository --module-subset=default,-qtwebengine",
     #         ]
@@ -469,15 +578,15 @@ DEPENDENCIES: List[Dependency] = [
     #     ),
     #     build_system=Autotools()
     # ),
-    Dependency(
-        name="boost",
-        source=InternetArchive(
-            url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz',
-            # expected_hash='94ced8b72956591c4775ae2207a9763d3600b30d9d7446562c552f0a14a63be7' sha256
-            expected_hash=None,
-        ),
-        build_system=BoostBuildSystem()
-    ),
+    # Dependency(
+    #     name="boost",
+    #     source=InternetArchive(
+    #         url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz',
+    #         # expected_hash='94ced8b72956591c4775ae2207a9763d3600b30d9d7446562c552f0a14a63be7' sha256
+    #         expected_hash=None,
+    #     ),
+    #     build_system=BoostBuildSystem()
+    # ),
     # Dependency(
     #     # https://doc.cgal.org/latest/Manual/installation.html#installation_configwithcmake
     #     name="CGAL",
@@ -486,7 +595,7 @@ DEPENDENCIES: List[Dependency] = [
     #         expected_hash=None,
     #     ),
     #     build_system=CMake()
-    # )
+    # ),
     # Dependency(
     #     name="libtiff",
     #     source=InternetArchive(
@@ -514,12 +623,20 @@ DEPENDENCIES: List[Dependency] = [
     #     ),
     # ),
     # Dependency(
-  #     name='libgeotiff',
-    #   source=InternetArchive(
-    #     url="http://download.osgeo.org/geotiff/libgeotiff/libgeotiff-1.7.0.tar.gz",
-    #     expected_hash=None,
-    #   ),
-    #   build_system=Autotools(),
+    #     name='libgeotiff',
+    #     source=InternetArchive(
+    #         url="http://download.osgeo.org/geotiff/libgeotiff/libgeotiff-1.7.0.tar.gz",
+    #         expected_hash=None,
+    #     ),
+    #     build_system=Autotools(),
+    # ),
+    # Dependency(
+    #     name="png",
+    #     source=InternetArchive(
+    #         url='http://prdownloads.sourceforge.net/libpng/libpng-1.6.37.tar.xz',
+    #         expected_hash=None,
+    #     ),
+    #     build_system=Autotools()
     # ),
     # Dependency(
     #     name='gdal',
@@ -533,6 +650,15 @@ DEPENDENCIES: List[Dependency] = [
     #     )
     # ),
     # Dependency(
+    #     name="eigen",
+    #     source=InternetArchive(
+    #         url='https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz',
+    #         expected_hash=None,
+    #     ),
+    #     build_system=CMake(),
+    #
+    # ),
+    # Dependency(
     #     name='laz-perf',
     #     source=GitRepo(
     #         url="https://github.com/hobu/laz-perf",
@@ -544,13 +670,26 @@ DEPENDENCIES: List[Dependency] = [
     #       }
     #     )
     # ),
+    Dependency(
+      name='pdal',
+      source=InternetArchive(
+        url='https://github.com/PDAL/PDAL/releases/download/2.3.0/PDAL-2.3.0-src.tar.gz',
+        expected_hash=None,
+      ),
+      build_system=CMake(
+          configure_options={
+              "-DWITH_TESTS": "OFF",
+              "-DWITH_LAZPERF": "ON",
+          }
+      )
+    ),
     # Dependency(
-    #   name='pdal',
-    #   source=InternetArchive(
-    #     url='https://github.com/PDAL/PDAL/releases/download/2.3.0/PDAL-2.3.0-src.tar.gz',
-    #     expected_hash=None,
-    #   ),
-    #   build_system=CMake()
+    #     name="dlib",
+    #     source=InternetArchive(
+    #         url='http://dlib.net/files/dlib-19.23.tar.bz2',
+    #         expected_hash=None,
+    #     ),
+    #     build_system=CMake(),
     # )
 ]
 
@@ -559,8 +698,8 @@ def main():
     logging.basicConfig(
         level=logging.DEBUG
     )
-    
-    WORKING_DIR.mkdir(exist_ok=True)
+
+
     
     for dependency in DEPENDENCIES:
         LOGGER.info(f"Handling dependency named '{dependency.name}'")

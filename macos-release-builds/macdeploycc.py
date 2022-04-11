@@ -8,16 +8,22 @@ import argparse
 
 
 def list_used_shared_libs(path: str) -> List[str]:
+    """ given a path to a binary (either executable or lib) returns a list
+    of dylibs this binary depends on as given by otool.
+
+    :param path: path the binary to scan
+    :return: list of dylibs used
+    """
     otool_output = subprocess.run(['otool', '-L', path], capture_output=True).stdout
     otool_output = otool_output.decode('utf-8')
 
     needed_libs = otool_output.split('\n\t')
-    # First line if the path we gave
+    # First line is the path we gave
     # Second line is our lib
     needed_libs = needed_libs[2:]
     # Now needed_libs is a list of strings that look like this
     # "/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 1200.3.0)"
-    # We only are about the first part
+    # We only care about the first part
     needed_libs = [lib.split(' ')[0] for lib in needed_libs]
 
     return needed_libs
@@ -36,9 +42,26 @@ def get_rpath(binary_path: str) -> Optional[str]:
 
 
 def filter_out_libs_we_should_not_touch(loaded_paths: List[str]) -> List[str]:
-    return [lib for lib in loaded_paths if
-            not lib.startswith('/usr/lib') and not lib.startswith('/System') and not lib.startswith(
-                '@') and lib.startswith('/')]
+    def should_be_ignored(lib_path: str) -> bool:
+        if lib_path.startswith('/usr/lib'):
+            return True
+
+        if lib_path.startswith("/System"):
+            return True
+
+        if lib_path.startswith('@'):
+            return True
+
+        if lib_path.startswith('/'):
+            return False
+
+        return False
+
+    return [lib for lib in loaded_paths if not should_be_ignored(lib)]
+
+    # return [lib for lib in loaded_paths if
+    #         not lib.startswith('/usr/lib') and not lib.startswith('/System') and not lib.startswith(
+    #             '@') and lib.startswith('/')]
 
 
 def handle_qt_frameworks(cc_plugin_path: str, frameworks_path: str) -> None:
@@ -79,16 +102,23 @@ def list_all_external_libs(paths: List[str]):
 
         already_analyzed.add(current_lib)
 
+        all_needed_libs = list_used_shared_libs(current_lib)
+        needed_libs = filter_out_libs_we_should_not_touch(all_needed_libs)
+
         current_lib_rpath = get_rpath(current_lib)
         if current_lib_rpath is not None:
             current_lib_rpath = os.path.normpath(
                 current_lib_rpath.replace("@loader_path", os.path.dirname(current_lib)))
 
-        all_needed_libs = list_used_shared_libs(current_lib)
+            needed_libs = [
+                os.path.normpath(lib.replace("@rpath", current_lib_rpath))
+                for lib in needed_libs if lib.startswith('@rpath')
+            ]
 
-        needed_libs = [os.path.normpath(lib.replace("@rpath", current_lib_rpath)) for lib in all_needed_libs if
-                       lib.startswith('@rpath')]
-        needed_libs = needed_libs + filter_out_libs_we_should_not_touch(all_needed_libs)
+        # needed_libs = [os.path.normpath(lib.replace("@rpath", current_lib_rpath)) for lib in all_needed_libs if
+        #                lib.startswith('@rpath')]
+
+        # needed_libs = needed_libs + filter_out_libs_we_should_not_touch(all_needed_libs)
 
         external_libs.append((current_lib, needed_libs))
         for needed_lib in needed_libs:
@@ -102,8 +132,9 @@ def list_all_external_libs(paths: List[str]):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("app_path")
+    parser = argparse.ArgumentParser(description="Script that will copy third dependencies into the App Bundle "
+                                                 "and update load paths so that the .app is self contained")
+    parser.add_argument("app_path", help="Path the the .app")
     parser.add_argument("--verbose", action='store_true', default=False)
     parser.add_argument("--sign", action='store_true', default=False)
 
@@ -121,7 +152,7 @@ def main():
         get_rpath(str(executable_path)).replace("@executable_path", str(executable_path.parent)))
     assert app_rpath == frameworks_path, 'This script relies on the executable rpath pointing to frameworks path'
 
-    # TODO install_name_toll -i should be used somewehere (i think on the libs we copied)
+    # TODO install_name_tool -i should be used somewehere (i think on the libs we copied)
 
     all_external_libs = []
     libs_to_update = []
