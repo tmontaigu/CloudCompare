@@ -82,6 +82,7 @@ class Config:
 
         # Dict with default config that should be used by the CMake build system
         self.cmake_default_config_opts = {
+            "-G": "Ninja",
             "-DCMAKE_BUILD_TYPE": "Release",
             "-DCMAKE_INSTALL_PREFIX": str(self.install_root),
             # Otherwise, on some Linux some lib would be in /lib and others in /lib64
@@ -94,10 +95,12 @@ class Config:
             # "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
             # "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE": "ONLY",
             "-DCMAKE_FIND_ROOT_PATH": str(self.install_root),
+            # "-DCMAKE_SKIP_RPATH": "TRUE",
         }
 
         if platform.system() == "Darwin":
             self.cmake_default_config_opts['-DCMAKE_OSX_ARCHITECTURES'] = self.target_arch
+            self.cmake_default_config_opts['-DCMAKE_OSX_DEPLOYMENT_TARGET'] = self.target_os_version
 
         # List of default options for Autotools build system
         self.default_autotools_config_opts: List[str] = [
@@ -168,6 +171,7 @@ def run_command(*args, **kwargs):
         stdout, stderr = sys.stdout, sys.stderr
 
     LOGGER.debug(f"Running Command {args[0]}")
+    # print(" ".join(args[0]))
     subprocess.run(*args, **kwargs, check=True, stdout=stdout, stderr=stderr, env=CONFIG.env_vars)
 
 
@@ -513,18 +517,14 @@ class BoostBuildSystem(BuildSystem):
             ])
 
     def create_b2_command(self) -> List[str]:
-        cxx_flags_value = f"-arch {CONFIG.target_arch}"
-        c_flags = cxx_flags_value
-        linkflags = f"-arch {CONFIG.target_arch}"
-
         # arm64 -> arm, x86_64 -> x86
         architecture = CONFIG.target_arch[:3]
 
         command = [
             './b2',
-            f'cxxflags={cxx_flags_value}',
-            f'cflags={c_flags}',
-            f'linkflags={linkflags}',
+            f'cxxflags={CONFIG.compiler_flags}',
+            f'cflags={CONFIG.compiler_flags}',
+            f'linkflags={CONFIG.linker_flags}',
             'target-os=darwin',
             f'architecture={architecture}',
         ]
@@ -550,126 +550,147 @@ class BoostBuildSystem(BuildSystem):
 
 
 DEPENDENCIES: List[Dependency] = [
-    # Dependency(
-    #     name="Qt5",
-    #     source=GitRepo(
-    #         url="git://code.qt.io/qt/qt5.git",
-    #         ref="v5.15.2",
-    #         # TODO: move this to configure step of build system ?
-    #         after_commands=[
-    #             "./init-repository --module-subset=default,-qtwebengine",
-    #         ]
-    #     ),
-    #     build_system=Qt5Build()
-    # ),
-    # Dependency(
-    #     name="GMP",
-    #     source=InternetArchive(
-    #         url="https://gmplib.org/download/gmp/gmp-6.2.1.tar.xz",
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools(),
-    # ),
-    # Dependency(
-    #     name="MPFR",
-    #     source=InternetArchive(
-    #         url='https://www.mpfr.org/mpfr-current/mpfr-4.1.0.tar.xz',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools()
-    # ),
-    # Dependency(
-    #     name="boost",
-    #     source=InternetArchive(
-    #         url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz',
-    #         # expected_hash='94ced8b72956591c4775ae2207a9763d3600b30d9d7446562c552f0a14a63be7' sha256
-    #         expected_hash=None,
-    #     ),
-    #     build_system=BoostBuildSystem()
-    # ),
-    # Dependency(
-    #     # https://doc.cgal.org/latest/Manual/installation.html#installation_configwithcmake
-    #     name="CGAL",
-    #     source=InternetArchive(
-    #         url="https://github.com/CGAL/cgal/releases/download/v5.4/CGAL-5.4-library.tar.xz",
-    #         expected_hash=None,
-    #     ),
-    #     build_system=CMake()
-    # ),
-    # Dependency(
-    #     name="libtiff",
-    #     source=InternetArchive(
-    #         url="http://download.osgeo.org/libtiff/tiff-4.3.0.tar.gz",
-    #         expected_hash=None
-    #     ),
-    #     build_system=CMake()
-    # ),
-    # Dependency(
-    #     name='sqlite',
-    #     source=InternetArchive(
-    #         url='https://sqlite.org/2021/sqlite-autoconf-3360000.tar.gz',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools(),
-    # ),
-    # Dependency(
-    #     name='proj',
-    #     source=InternetArchive(
-    #         url="http://download.osgeo.org/proj/proj-8.1.0.tar.gz",
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools(
-    #         configure_options=['--without-curl']
-    #     ),
-    # ),
-    # Dependency(
-    #     name='libgeotiff',
-    #     source=InternetArchive(
-    #         url="http://download.osgeo.org/geotiff/libgeotiff/libgeotiff-1.7.0.tar.gz",
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools(),
-    # ),
-    # Dependency(
-    #     name="png",
-    #     source=InternetArchive(
-    #         url='http://prdownloads.sourceforge.net/libpng/libpng-1.6.37.tar.xz',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools()
-    # ),
-    # Dependency(
-    #     name='gdal',
-    #     source=InternetArchive(
-    #         url='https://github.com/OSGeo/gdal/releases/download/v3.3.1/gdal-3.3.1.tar.gz',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=Autotools(
-    #         configure_options=['--with-python=no'],
-    #         supports_out_of_tree_build=False,
-    #     )
-    # ),
-    # Dependency(
-    #     name="eigen",
-    #     source=InternetArchive(
-    #         url='https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=CMake(),
-    #
-    # ),
-    # Dependency(
-    #     name='laz-perf',
-    #     source=GitRepo(
-    #         url="https://github.com/hobu/laz-perf",
-    #         ref="3.0.0",
-    #     ),
-    #     build_system=CMake(
-    #       configure_options={
-    #         "-DWITH_TESTS": "FALSE",
-    #       }
-    #     )
-    # ),
+    Dependency(
+        name="Qt5",
+        source=GitRepo(
+            url="git://code.qt.io/qt/qt5.git",
+            ref="v5.15.2",
+            # TODO: move this to configure step of build system ?
+            after_commands=[
+                "./init-repository --module-subset=default,-qtwebengine",
+            ]
+        ),
+        build_system=Qt5Build()
+    ),
+    Dependency(
+        name="GMP",
+        source=InternetArchive(
+            url="https://gmplib.org/download/gmp/gmp-6.2.1.tar.xz",
+            expected_hash=None,
+        ),
+        build_system=Autotools(),
+    ),
+    Dependency(
+        name="MPFR",
+        source=InternetArchive(
+            url='https://www.mpfr.org/mpfr-current/mpfr-4.1.0.tar.xz',
+            expected_hash=None,
+        ),
+        build_system=Autotools()
+    ),
+    Dependency(
+        name="boost",
+        source=InternetArchive(
+            url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz',
+            # expected_hash='94ced8b72956591c4775ae2207a9763d3600b30d9d7446562c552f0a14a63be7' sha256
+            expected_hash=None,
+        ),
+        build_system=BoostBuildSystem()
+    ),
+    Dependency(
+        # https://doc.cgal.org/latest/Manual/installation.html#installation_configwithcmake
+        name="CGAL",
+        source=InternetArchive(
+            url="https://github.com/CGAL/cgal/releases/download/v5.4/CGAL-5.4-library.tar.xz",
+            expected_hash=None,
+        ),
+        build_system=CMake()
+    ),
+    Dependency(
+        name="libtiff",
+        source=InternetArchive(
+            url="http://download.osgeo.org/libtiff/tiff-4.3.0.tar.gz",
+            expected_hash=None
+        ),
+        build_system=CMake()
+    ),
+    Dependency(
+        name='sqlite',
+        source=InternetArchive(
+            url='https://sqlite.org/2021/sqlite-autoconf-3360000.tar.gz',
+            expected_hash=None,
+        ),
+        build_system=Autotools(),
+    ),
+    Dependency(
+        name='proj',
+        source=InternetArchive(
+            url="http://download.osgeo.org/proj/proj-8.1.0.tar.gz",
+            expected_hash=None,
+        ),
+        build_system=Autotools(
+            configure_options=['--without-curl']
+        ),
+        # source=InternetArchive(
+        #     # url="http://download.osgeo.org/proj/proj-8.1.0.tar.gz",
+        #     url="http://download.osgeo.org/proj/proj-9.0.0.tar.gz",
+        #     expected_hash=None,
+        # ),
+        # build_system=CMake(
+        #   configure_options={
+        #     "-DBUILD_APPS": "OFF",
+        #     "-DENABLE_CURL": "OFF",
+        #     "-DBUILD_TESTING": "OFF"
+        #   }
+        # )
+    ),
+    Dependency(
+        name='libgeotiff',
+        source=InternetArchive(
+            url="http://download.osgeo.org/geotiff/libgeotiff/libgeotiff-1.7.0.tar.gz",
+            expected_hash=None,
+        ),
+        build_system=Autotools(),
+    ),
+    Dependency(
+        name="png",
+        source=InternetArchive(
+            url='http://prdownloads.sourceforge.net/libpng/libpng-1.6.37.tar.xz',
+            expected_hash=None,
+        ),
+        build_system=Autotools()
+    ),
+    Dependency(
+        name='gdal',
+        source=InternetArchive(
+            url='https://github.com/OSGeo/gdal/releases/download/v3.3.1/gdal-3.3.1.tar.gz',
+            expected_hash=None,
+        ),
+        build_system=Autotools(
+            configure_options=['--with-python=no'],
+            supports_out_of_tree_build=False,
+        )
+    ),
+    Dependency(
+        name="eigen",
+        source=InternetArchive(
+            url='https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz',
+            expected_hash=None,
+        ),
+        build_system=CMake(),
+
+    ),
+    Dependency(
+        name='laz-perf',
+        source=GitRepo(
+            url="https://github.com/hobu/laz-perf",
+            ref="2.1.0",
+        ),
+        build_system=CMake(
+          configure_options={
+            "-DWITH_TESTS": "FALSE",
+          }
+        )
+    ),
+    Dependency(
+        name='LASzip',
+        source=InternetArchive(
+            url="https://github.com/LASzip/LASzip/releases/download/3.4.3/laszip-src-3.4.3.tar.gz",
+            expected_hash=None,
+        ),
+        build_system=CMake()
+    ),
+    # pdal does not seems to be able to find lazperf properly
     Dependency(
       name='pdal',
       source=InternetArchive(
@@ -679,18 +700,79 @@ DEPENDENCIES: List[Dependency] = [
       build_system=CMake(
           configure_options={
               "-DWITH_TESTS": "OFF",
-              "-DWITH_LAZPERF": "ON",
+              # "-DWITH_LAZPERF": "ON",
+              "-DCMAKE_FIND_FRAMEWORK": "NEVER",
+              "-DWITH_LASZIP": "ON",
+              # "-DLazperf_DIR": f"{CONFIG.install_lib / 'cmake' / 'lazperf' }",
+
+              # "-DCMAKE_MACOSX_RPATH": "OFF",
           }
       )
     ),
-    # Dependency(
-    #     name="dlib",
-    #     source=InternetArchive(
-    #         url='http://dlib.net/files/dlib-19.23.tar.bz2',
-    #         expected_hash=None,
-    #     ),
-    #     build_system=CMake(),
-    # )
+    Dependency(
+        name="dlib",
+        source=InternetArchive(
+            url='http://dlib.net/files/dlib-19.23.tar.bz2',
+            expected_hash=None,
+        ),
+        build_system=CMake(
+            configure_options={
+                "-DCMAKE_CXX_FLAGS": "-DDLIB_NO_GUI_SUPPORT",
+            }
+        ),
+    ),
+    Dependency(
+        name="flann",
+        source=InternetArchive(
+            url="https://github.com/flann-lib/flann/archive/refs/tags/1.9.1.tar.gz",
+            expected_hash="sha256:b23b5f4e71139faa3bcb39e6bbcc76967fbaf308c4ee9d4f5bfbeceaa76cc5d3",
+        ),
+        build_system=CMake(
+            configure_options={
+                "-DBUILD_C_BINDINGS": "OFF",
+                "-DBUILD_EXAMPLES": "OFF",
+                "-DBUILD_TESTS": "OFF",
+                "-DBUILD_DOC": "OFF",
+            }
+        )
+    ),
+    Dependency(
+        name="PCL",
+        source=InternetArchive(
+            url='https://github.com/PointCloudLibrary/pcl/archive/pcl-1.11.0.tar.gz',
+            expected_hash="sha256:4255c3d3572e9774b5a1dccc235711b7a723197b79430ef539c2044e9ce65954"
+        ),
+        build_system=CMake(
+            configure_options={
+                "-DWITH_LIBUSB": 'OFF',
+                "-DWITH_QT": "OFF",
+                "-DDWITH_VTK": "OFF",
+                "-DDWITH_PCAP": "OFF",
+                "-DPCL_ONLY_CORE_POINT_TYPES": 'ON',
+                "-DBUILD_2d": "ON",
+                "-DBUILD_CUDA": "OFF",
+                "-DBUILD_GPU": "ON",
+                "-DBUILD_apps": "OFF",
+                "-DBUILD_examples": "OFF",
+                "-DBUILD_common": "ON",
+                "-DBUILD_geometry": "OFF",
+                "-DBUILD_stereo": "OFF",
+                "-DBUILD_registration": "OFF",
+                "-DBUILD_recognition": "OFF",
+                "-DBUILD_segmentation": "OFF",
+                "-DBUILD_simulation": "OFF",
+            }
+        )
+    ),
+    # Needed for E57 plugin
+    Dependency(
+        name="Xerces-C",
+        source=InternetArchive(
+            url="https://dlcdn.apache.org//xerces/c/3/sources/xerces-c-3.2.3.tar.gz",
+            expected_hash="sha256:fb96fc49b1fb892d1e64e53a6ada8accf6f0e6d30ce0937956ec68d39bd72c7e",
+        ),
+        build_system=CMake()
+    )
 ]
 
 
@@ -699,11 +781,27 @@ def main():
         level=logging.DEBUG
     )
 
-
-    
     for dependency in DEPENDENCIES:
         LOGGER.info(f"Handling dependency named '{dependency.name}'")
         dependency.handle()
+
+    run_command([
+        'install_name_tool',
+        '-change',
+        '@executable_path/../lib/liblaszip.8.dylib',
+        f"{CONFIG.install_lib / 'liblaszip.8.dylib'}",
+        f"{CONFIG.install_lib / 'libpdalcpp.dylib'}",
+    ])
+
+    pcl_libs = CONFIG.install_lib.glob('libpcl_*')
+    for lib in pcl_libs:
+        run_command([
+            'install_name_tool',
+            '-change',
+            'libflann_cpp.1.9.dylib',
+            f'{CONFIG.install_lib / "libflann_cpp.1.9.dylib"}',
+            str(lib)
+        ])
 
 
 if __name__ == '__main__':
@@ -716,7 +814,7 @@ if __name__ == '__main__':
     
     
     
-    
+
 '''
     If you ever happen to want to link against installed libraries
 in a given directory, LIBDIR, you must either use libtool, and

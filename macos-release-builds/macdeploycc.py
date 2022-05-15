@@ -2,9 +2,12 @@
 import os.path
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from pprint import pprint
+from typing import List, Optional, Union
 import argparse
+
 
 
 def list_used_shared_libs(path: str) -> List[str]:
@@ -215,6 +218,7 @@ def main():
                         '--sign', signing_id, args.app_path], capture_output=False)
 
         subprocess.run(['codesign', '-vvv', '--deep', args.app_path])
+
 
 
 if __name__ == '__main__':

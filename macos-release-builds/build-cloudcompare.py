@@ -2,6 +2,7 @@
 
 import argparse
 import multiprocessing
+import shutil
 from pathlib import Path
 from typing import Dict
 import subprocess
@@ -33,11 +34,14 @@ def run_build(args):
             "-DCMAKE_IGNORE_PATH=/opt/homebrew/lib/",
             "-DCMAKE_BUILD_TYPE=Release",
             f"-DCMAKE_INSTALL_PREFIX={install_dir}",
+            # '-DCMAKE_MACOSX_RPATH=OFF',
             # macOS special things
             f"-DCMAKE_OSX_ARCHITECTURES={args.arch}",
             f"-DCMAKE_OSX_DEPLOYMENT_TARGET={args.macos_version}",
             # CloudCompare triggers a bunch of deprecated when built with Qt5.15
-            "-DCMAKE_CXX_FLAGS=-Wno-deprecated -DDLIB_NO_GUI_SUPPORT",
+            # Others ignored warnings are from RANSAC
+            "-DCMAKE_CXX_FLAGS=-Wno-deprecated -Wno-writable-strings -Wno-inconsistent-missing-override -DDLIB_NO_GUI_SUPPORT -DCC_MAC_DEV_PATHS",
+            f"-DCMAKE_INSTALL_RPATH={dependencies_dir / 'lib'}",
             f"-DEIGEN_ROOT_DIR={EIGEN_ROOT_DIR}",
             # CloudCompare CMake options
             '-DOPTION_BUILD_CCVIEWER=OFF',
@@ -60,7 +64,7 @@ def run_build(args):
             "-DPLUGIN_STANDARD_QHPR=ON",
             "-DPLUGIN_STANDARD_QM3C2=ON",
             "-DPLUGIN_STANDARD_QMPLANE=ON",
-            "-DPLUGIN_STANDARD_QPCL=OFF",  # TODO
+            "-DPLUGIN_STANDARD_QPCL=ON",
             "-DPLUGIN_STANDARD_QPCV=ON",
             "-DPLUGIN_STANDARD_QPOISSON_RECON=ON",
             "-DPLUGIN_STANDARD_QRANSAC_SD=ON",
@@ -72,8 +76,8 @@ def run_build(args):
             "-DPLUGIN_IO_QCORE=ON",
             "-DPLUGIN_IO_QADDITIONAL=ON",
             "-DPLUGIN_IO_QCSV_MATRIX=ON",
-            "-DPLUGIN_IO_QE57=OFF",  # TODO
-            "-DPLUGIN_IO_QPDAL=ON", # TODO lazperf missing
+            "-DPLUGIN_IO_QE57=ON",  # TODO
+            "-DPLUGIN_IO_QPDAL=ON",
             "-DPLUGIN_IO_QPHOTOSCAN=ON",
         ],
         check=True,
@@ -81,6 +85,28 @@ def run_build(args):
 
     subprocess.run([CMAKE, "--build", str(build_dir), f"-j{args.num_jobs}"], check=True)
     subprocess.run([CMAKE, "--install", str(build_dir)], check=True)
+
+    # shutil.copy2(
+    #     src=f"{build_dir / 'plugins' / 'core' / 'IO' / 'qPDALIO' / 'libQPDAL_IO_PLUGIN.dylib'}",
+    #     dst=f"{install_dir / 'CloudCompare' / 'CloudCompare.app' / 'Contents' / 'PlugIns' / 'ccPlugins' / 'libQPDAL_IO_PLUGIN.dylib'}"
+    # )
+
+    subprocess.run([
+        'install_name_tool',
+        '-change',
+        'libflann_cpp.1.9.dylib',
+        str(dependencies_dir /'lib' / "libflann_cpp.1.9.dylib"),
+        str(install_dir / 'CloudCompare' / 'CloudCompare.app' / 'Contents' / 'Plugins' / 'ccPlugins' / 'libQPCL_IO_PLUGIN.dylib')
+    ])
+    
+    subprocess.run([
+        'install_name_tool',
+        '-change',
+        'libflann_cpp.1.9.dylib',
+        str(dependencies_dir /'lib' / "libflann_cpp.1.9.dylib"),
+        str(install_dir / 'CloudCompare' / 'CloudCompare.app' / 'Contents' / 'Plugins' / 'ccPlugins' / 'libQPCL_PLUGIN.dylib')
+    ])
+
 
 
 def main():
