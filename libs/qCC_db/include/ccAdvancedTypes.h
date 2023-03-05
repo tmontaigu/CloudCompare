@@ -28,11 +28,11 @@
 ***************************************************/
 
 //! Array of compressed 3D normals (single index)
-class NormsIndexesTableType : public ccArray<CompressedNormType, 1, CompressedNormType>
+class QCC_DB_LIB_API NormsIndexesTableType : public ccArray<CompressedNormType, 1, CompressedNormType>
 {
 public:
 	//! Default constructor
-	QCC_DB_LIB_API NormsIndexesTableType();
+	NormsIndexesTableType();
 	~NormsIndexesTableType() override = default;
 	
 	//inherited from ccArray/ccHObject
@@ -54,11 +54,11 @@ public:
 	}
 
 	//inherited from ccHObject/ccArray
-	QCC_DB_LIB_API bool fromFile_MeOnly(QFile& in, short dataVersion, int flags, LoadedIDMap& oldToNewIDMap) override;
+	bool fromFile_MeOnly(QFile& in, short dataVersion, int flags, LoadedIDMap& oldToNewIDMap) override;
 };
 
 //! Array of (uncompressed) 3D normals (Nx,Ny,Nz)
-class NormsTableType : public ccArray<CCVector3, 3,PointCoordinateType>
+class QCC_DB_LIB_API NormsTableType : public ccArray<CCVector3, 3,PointCoordinateType>
 {
 public:
 	//! Default constructor
@@ -84,7 +84,7 @@ public:
 };
 
 //! Array of RGB colors for each point
-class ColorsTableType : public ccArray<ccColor::Rgb, 3, ColorCompType>
+class QCC_DB_LIB_API ColorsTableType : public ccArray<ccColor::Rgb, 3, ColorCompType>
 {
 public:
 	//! Default constructor
@@ -110,7 +110,7 @@ public:
 };
 
 //! Array of RGBA colors for each point
-class RGBAColorsTableType : public ccArray<ccColor::Rgba, 4, ColorCompType>
+class QCC_DB_LIB_API RGBAColorsTableType : public ccArray<ccColor::Rgba, 4, ColorCompType>
 {
 public:
 	//! Default constructor
@@ -136,7 +136,7 @@ public:
 };
 
 //! 2D texture coordinates
-struct TexCoords2D
+struct QCC_DB_LIB_API TexCoords2D
 {
 	TexCoords2D() : tx(-1.0f), ty(-1.0f) {}
 	TexCoords2D(float x, float y) : tx(x), ty(y) {}
@@ -152,7 +152,7 @@ struct TexCoords2D
 };
 
 //! Array of 2D texture coordinates
-class TextureCoordsContainer : public ccArray<TexCoords2D, 2, float>
+class QCC_DB_LIB_API TextureCoordsContainer : public ccArray<TexCoords2D, 2, float>
 {
 public:
 	//! Default constructor
